@@ -1,3 +1,4 @@
+#define MAXARGV 30      //命令行最大参数
 #include "userprog/process.h"
 #include <debug.h>
 #include <inttypes.h>
@@ -21,6 +22,8 @@
 #include "threads/vaddr.h"
 
 static struct semaphore temporary;
+static bool is_child_loaded=false;
+struct lock child_loaded;
 static thread_func start_process NO_RETURN;
 static thread_func start_pthread NO_RETURN;
 static bool load(const char* file_name, void (**eip)(void), void** esp);
@@ -33,7 +36,7 @@ bool setup_thread(void (**eip)(void), void** esp);
 void userprog_init(void) {
   struct thread* t = thread_current();
   bool success;
-
+  lock_init(&child_loaded);
   /* Allocate process control block
      It is imoprtant that this is a call to calloc and not malloc,
      so that t->pcb->pagedir is guaranteed to be NULL (the kernel's
@@ -53,8 +56,12 @@ void userprog_init(void) {
 pid_t process_execute(const char* file_name) {
   char* fn_copy;
   tid_t tid;
+  is_child_loaded=false;
 
-  sema_init(&temporary, 0);
+  if(&thread_current()->pcb<=PHYS_BASE)
+  sema_init(&thread_current()->pcb->from_child, 0);
+  else 
+  sema_init(&temporary,0);
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page(0);
@@ -62,17 +69,52 @@ pid_t process_execute(const char* file_name) {
     return TID_ERROR;
   strlcpy(fn_copy, file_name, PGSIZE);
 
+  /*分配变量以传进子进程*/
+  struct communcate*commu=malloc(sizeof(struct communcate));
+  commu->father=thread_current();
+  commu->fn_copy=fn_copy;
+
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create(file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create(file_name, PRI_DEFAULT, start_process, commu);
   if (tid == TID_ERROR)
     palloc_free_page(fn_copy);
+
+ // printf("do-nothing: exit(162)\n");
+  /*等待子进程加载完成*/
+//  if(strcmp(thread_current()->name,"main")!=0)
+  if(&thread_current()->pcb<=PHYS_BASE)
+  sema_down(&thread_current()->pcb->from_child);//等不到！！！
+  else
+  sema_down(&temporary);
+
+  /*释放传递的变量*/
+  free(commu);
+
+  /*执行表加载失败*/
+  lock_acquire(&child_loaded);
+  if(!is_child_loaded)
+  {
+    lock_release(&child_loaded);
+    palloc_free_page(fn_copy);
+    tid=-1;
+  }
   return tid;
+}
+
+/*将字符串推入栈中，并返回栈指针*/
+uint32_t push_str_into_stack(const char* arg,uint32_t esp)
+{
+  int size=strlen(arg)+1;
+  esp-=size;
+  memcpy((void*)esp,arg,size);
+  return esp;
 }
 
 /* A thread function that loads a user process and starts it
    running. */
-static void start_process(void* file_name_) {
-  char* file_name = (char*)file_name_;
+static void start_process(void* argvs_) {
+  struct communcate*argss=(struct communcate*)argvs_;
+  char* argvs = argss->fn_copy;
   struct thread* t = thread_current();
   struct intr_frame if_;
   bool success, pcb_success;
@@ -81,6 +123,23 @@ static void start_process(void* file_name_) {
   struct process* new_pcb = malloc(sizeof(struct process));
   success = pcb_success = new_pcb != NULL;
 
+  /*计算命令行参数个数并将命令行存入argv中*/
+  int argc=0;
+  char *argv[MAXARGV];
+  int args;
+  if(success){
+  char *saveptr;
+  char *token=strtok_r(argvs," ",&saveptr);
+  int index=0;
+  while(token!=NULL&&index<MAXARGV)
+  {
+    
+    argv[index++]=token;
+    token=strtok_r(NULL," ",&saveptr);
+    argc++;
+  }
+  args=index;
+  }
   /* Initialize process control block */
   if (success) {
     // Ensure that timer_interrupt() -> schedule() -> process_activate()
@@ -91,6 +150,18 @@ static void start_process(void* file_name_) {
     // Continue initializing the PCB as normal
     t->pcb->main_thread = t;
     strlcpy(t->pcb->process_name, t->name, sizeof t->name);
+
+    /*设置父子关系*/
+    t->pcb->father=argss->father;
+    list_init(&t->child_process);
+    if(argss->father<=PHYS_BASE)
+    list_push_back(&argss->father->main_thread->child_process,&t->pcb->elem_process);
+  
+    /*初始化是否已被等待*/
+    t->pcb->waited=false;
+
+    /*初始化父进程与子进程通信的信号量*/
+    sema_init(&t->pcb->wait_for_child,0);
   }
 
   /* Initialize interrupt frame and load executable. */
@@ -99,9 +170,57 @@ static void start_process(void* file_name_) {
     if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
     if_.cs = SEL_UCSEG;
     if_.eflags = FLAG_IF | FLAG_MBS;
-    success = load(file_name, &if_.eip, &if_.esp);
+    success = load(argvs, &if_.eip, &if_.esp);
+
+    /*加载成功*/
+    if(success)
+    {
+      lock_acquire(&child_loaded);
+      is_child_loaded=true;
+      lock_release(&child_loaded);
+    }
   }
 
+  uint32_t *addr_argv=malloc(sizeof(uint32_t)*MAXARGV);
+  if(!addr_argv)success=!success;
+  if(success){
+
+    /*存入argv[argc]，保持栈结构*/
+    if_.esp-=4;
+
+    /* 将命令行的所有参数推入栈*/
+  for(int i=0;i<args;i++)
+  {
+    if_.esp=push_str_into_stack(argv[i],if_.esp);
+    addr_argv[args-i-1]=if_.esp;
+  }
+  
+  /*设置对齐标准*/
+  int stack_align=16-(0xc0000000-4 - (unsigned int)if_.esp)%16;//16字节对齐
+  if(stack_align!=16)
+  if_.esp-=stack_align;
+
+  /*存入命令行参数的指针*/
+  for(int i=0;i<args;i++)
+  {
+    if_.esp-=4;
+    memcpy(if_.esp,&addr_argv[i],4);
+  }
+
+  /*存入命令行字符串数组的头位置*/
+  uint32_t tmp=if_.esp;
+  if_.esp-=4;
+  memcpy(if_.esp,&tmp,4);
+
+  /*存入argc*/
+  if_.esp-=4;
+  memcpy(if_.esp,&argc,4);
+
+  /*存入fake_return_address*/
+  if_.esp-=4;
+
+  }
+ 
   /* Handle failure with succesful PCB malloc. Must free the PCB */
   if (!success && pcb_success) {
     // Avoid race where PCB is freed before t->pcb is set to NULL
@@ -113,21 +232,49 @@ static void start_process(void* file_name_) {
   }
 
   /* Clean up. Exit on failure or jump to userspace */
-  palloc_free_page(file_name);
+  palloc_free_page(argvs);
+  /*释放存地址的空间*/
+  free(addr_argv);
   if (!success) {
+    if(t->pcb->father>PHYS_BASE)
     sema_up(&temporary);
+    else
+    sema_up(&t->pcb->father->from_child);
     thread_exit();
   }
+  
+  /*通知父进程*/
+  if(argss->father<=PHYS_BASE)
+  sema_up(&thread_current()->pcb->father->from_child);
+  else
+  sema_up(&temporary);
 
-  /* Start the user process by simulating a return from an
+    /* Start the user process byq simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
      arguments on the stack in the form of a `struct intr_frame',
      we just point the stack pointer (%esp) to our stack frame
      and jump to it. */
-  asm volatile("movl %0, %%esp; jmp intr_exit" : : "g"(&if_) : "memory");
-  NOT_REACHED();
+    asm volatile("movl %0,%%esp;jmp intr_exit" : : "g"(&if_) : "memory");
+
+    NOT_REACHED();
 }
+
+/*根据子进程的id返回子进程的指针，如果没找到则返回NULL*/
+struct thread *get_child_process(pid_t child_tid,struct thread*father)
+{
+  struct list_elem*e;
+  for(e=list_begin(&father->elem);e!=list_end(&father->elem);e=list_next(e))
+  {
+    struct thread*cp=list_entry(e,struct thread,elem);
+    if(cp->tid==child_tid)
+    {
+      return cp;
+    }
+  }
+  return NULL;
+}
+
 
 /* Waits for process with PID child_pid to die and returns its exit status.
    If it was terminated by the kernel (i.e. killed due to an
@@ -138,9 +285,31 @@ static void start_process(void* file_name_) {
 
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
-int process_wait(pid_t child_pid UNUSED) {
-  sema_down(&temporary);
-  return 0;
+int process_wait(pid_t child_pid) {
+  /*得到父进程*/
+  struct thread*cur=thread_current();
+
+  if(cur->pcb>PHYS_BASE)
+  {
+    sema_down(&temporary);
+    return 0;
+  }
+  /*得到子进程*/
+  struct thread *cp=get_child_process(child_pid,cur);
+
+  /*找不到该子进程*/
+  if(!cp)return TID_ERROR;
+
+  /*子进程已被等待过*/
+  if(cp->pcb->waited)return TID_ERROR;
+
+  /*标记子进程已被等待*/
+  cp->pcb->waited=true;
+
+  /*等待子进程结束*/
+  sema_down(&cur->pcb->wait_for_child);
+
+  return cp->status;
 }
 
 /* Free the current process's resources. */
@@ -152,7 +321,7 @@ void process_exit(void) {
   if (cur->pcb == NULL) {
     thread_exit();
     NOT_REACHED();
-  }
+  } 
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -170,6 +339,12 @@ void process_exit(void) {
     pagedir_destroy(pd);
   }
 
+  /*告诉父进程自己已结束*/
+  if(cur->pcb->father<=PHYS_BASE)
+  sema_up(&cur->pcb->father->wait_for_child);
+  else
+  sema_up(&temporary);
+
   /* Free the PCB of this process and kill this thread
      Avoid race where PCB is freed before t->pcb is set to NULL
      If this happens, then an unfortuantely timed timer interrupt
@@ -178,7 +353,6 @@ void process_exit(void) {
   cur->pcb = NULL;
   free(pcb_to_free);
 
-  sema_up(&temporary);
   thread_exit();
 }
 

@@ -81,6 +81,15 @@ typedef int tid_t;
    only because they are mutually exclusive: only a thread in the
    ready state is on the run queue, whereas only a thread in the
    blocked state is on a semaphore wait list. */
+
+  
+struct thread_file{
+  /*一个过渡结构体*/
+  int fd;
+  struct file*f;
+  struct list_elem elem_tf;
+};
+
 struct thread {
   /* Owned by thread.c. */
   tid_t tid;                 /* Thread identifier. */
@@ -90,11 +99,15 @@ struct thread {
   int priority;              /* Priority. */
   struct list_elem allelem;  /* List element for all threads list. */
 
+  int cur_file_fd;                  /*下一个使用的文件描述符*/
+  struct list open_files;           /*所有打开的文件*/
+
   /* Shared between thread.c and synch.c. */
   struct list_elem elem; /* List element. */
 
 #ifdef USERPROG
   /* Owned by process.c. */
+  struct list child_process;        /*子进程的list*/
   struct process* pcb; /* Process control block if this thread is a userprog */
 #endif
 

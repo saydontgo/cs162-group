@@ -17,6 +17,11 @@ typedef tid_t pid_t;
 typedef void (*pthread_fun)(void*);
 typedef void (*stub_fun)(pthread_fun, void*);
 
+struct communcate{
+   char*fn_copy;
+   struct process*father;
+};
+
 /* The process control block for a given process. Since
    there can be multiple threads per process, we need a separate
    PCB from the TCB. All TCBs in a process will have a pointer
@@ -27,6 +32,13 @@ struct process {
   uint32_t* pagedir;          /* Page directory. */
   char process_name[16];      /* Name of the main thread */
   struct thread* main_thread; /* Pointer to main thread */
+
+  pid_t pid;
+  bool waited;                      /*该子进程是否已被等待过*/
+  struct semaphore from_child;      /*调用exec时使用的信号量*/
+  struct semaphore wait_for_child;  /*调用wait时使用的信号量*/
+  struct process *father;            /*进程他爸*/
+  struct list_elem elem_process;
 };
 
 void userprog_init(void);
