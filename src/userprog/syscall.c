@@ -91,22 +91,32 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 
     if(!check_string(file))
     {
-      f->eax= false;
-      return;
-    }
-    struct file* success=filesys_open(file);
-    if(!success)
-    {
-      f->eax=-1;
+      f->eax= -1;
       return;
     }
 
     struct thread_file* tmp=malloc(sizeof(struct thread_file));
     tmp->fd=cur->cur_file_fd++;
-    tmp->f=success;
-
+    tmp->f=filesys_open(file);
+    if(tmp->f==NULL)
+    {
+      f->eax=-1;
+      return;
+    }
     list_push_back(&cur->open_files,&tmp->elem_tf);
     f->eax=tmp->fd;
+  }
+
+  if(args[0]==SYS_CLOSE)
+  {
+    int fd=args[1];
+    struct thread_file*tf=find_file(fd);
+    if(!tf)
+    {
+      return;
+    }
+    file_close(tf->f);
+    free(tf);
   }
 
   if(args[0]==SYS_FILESIZE)
@@ -183,8 +193,9 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 
 bool check_string(const char*being_checked)
 {
+  if(being_checked==NULL)return false;
   char*ptr;
-  for(ptr=being_checked;ptr!=NULL&&*ptr!='\0';ptr++)
+  for(ptr=being_checked;*ptr!='\0';ptr++)
   {
     if(!is_user_vaddr(ptr)||!pagedir_get_page(thread_current()->pcb->pagedir,ptr))
     return false;
