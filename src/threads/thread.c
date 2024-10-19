@@ -190,6 +190,10 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   /* Initialize thread. */
   init_thread(t, name, priority);
   tid = t->tid = allocate_tid();
+  /*初始化文件链表*/
+  list_init(&t->open_files);
+  /*初始化文件描述符*/
+  t->cur_file_fd=3;
 
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame(t, sizeof *kf);
@@ -425,7 +429,12 @@ static void init_thread(struct thread* t, const char* name, int priority) {
 
   memset(t, 0, sizeof *t);
   t->status = THREAD_BLOCKED;
-  strlcpy(t->name, name, sizeof t->name);
+
+  /*防止空格后面的参数打扰*/
+  int i=0;
+  while(name[i++]!=' ');
+
+  strlcpy(t->name, name, i);
   t->stack = (uint8_t*)t + PGSIZE;
   t->priority = priority;
   t->pcb = NULL;
