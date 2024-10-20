@@ -116,6 +116,7 @@ static void start_process(void* argvs_) {
   struct communcate*argss=(struct communcate*)argvs_;
   char* argvs = argss->fn_copy;
   struct thread* t = thread_current();
+  int total_len=strlen(argvs);
   struct intr_frame if_;
   bool success, pcb_success;
 
@@ -185,9 +186,6 @@ static void start_process(void* argvs_) {
   if(!addr_argv)success=!success;
   if(success){
 
-    /*存入argv[argc]，保持栈结构*/
-    if_.esp-=4;
-
     /* 将命令行的所有参数推入栈*/
   for(int i=0;i<args;i++)
   {
@@ -195,10 +193,12 @@ static void start_process(void* argvs_) {
     addr_argv[args-i-1]=if_.esp;
   }
   
-  /*设置对齐标准*/
-  int stack_align=16-(0xc0000000-4 - (unsigned int)if_.esp)%16;//16字节对齐
-  if(stack_align!=16)
-  if_.esp-=stack_align;
+  /*设置对齐,并把值推入栈*/
+   uint8_t stack_align=16-(unsigned)(argc*4+12+total_len+1)%16;
+   if_.esp-=stack_align;
+
+  /*存入argv[argc]，保持栈结构*/
+  if_.esp-=4;
 
   /*存入命令行参数的指针*/
   for(int i=0;i<args;i++)
@@ -233,7 +233,7 @@ static void start_process(void* argvs_) {
 
   /* Clean up. Exit on failure or jump to userspace */
   palloc_free_page(argvs);
-  /*释放存地址的空间*/
+  /*释放存地址的空间和字符串*/
   free(addr_argv);
   if (!success) {
     if(t->pcb->father>PHYS_BASE)

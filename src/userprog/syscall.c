@@ -64,12 +64,9 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
     char*file=args[1];
     int initial_size=args[2];
     if(!check_string(file))
-    {
-      f->eax= false;
-      return;
-    }
-    bool success=filesys_create(file,initial_size);
-    f->eax=success;
+      f->eax=false;
+    else
+    f->eax=filesys_create(file,initial_size);
   }
 
   if(args[0]==SYS_REMOVE)
@@ -91,7 +88,7 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 
     if(!check_string(file))
     {
-      f->eax= -1;
+      f->eax=-1;
       return;
     }
 
@@ -116,6 +113,7 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       return;
     }
     file_close(tf->f);
+    list_remove(&tf->elem_tf);
     free(tf);
   }
 
@@ -193,11 +191,13 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 
 bool check_string(const char*being_checked)
 {
-  if(being_checked==NULL)return false;
-  char*ptr;
-  for(ptr=being_checked;*ptr!='\0';ptr++)
+  if(being_checked==NULL||being_checked>PHYS_BASE)return false;
+  int i=0;
+  if(!is_user_vaddr(&being_checked[i])||!pagedir_get_page(thread_current()->pcb->pagedir,&being_checked[i]))
+  return false;
+  for(;being_checked[i]!='\0';i++)
   {
-    if(!is_user_vaddr(ptr)||!pagedir_get_page(thread_current()->pcb->pagedir,ptr))
+    if(being_checked[i+1]>PHYS_BASE||!is_user_vaddr(&being_checked[i+1])||!pagedir_get_page(thread_current()->pcb->pagedir,&being_checked[i+1]))
     return false;
   }
   return true;

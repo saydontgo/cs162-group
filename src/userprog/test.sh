@@ -1,7 +1,7 @@
 #! /bin/bash
 
 make
-if [ $2 -eq 1 ]
+if [ $2 -eq 1 ];
 then 
 pintos-test $1
 else 
