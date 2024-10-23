@@ -22,7 +22,6 @@
 #include "threads/vaddr.h"
 
 static struct semaphore temporary;
-static bool is_child_loaded=false;
 struct lock child_loaded;
 static thread_func start_process NO_RETURN;
 static thread_func start_pthread NO_RETURN;
@@ -56,12 +55,10 @@ void userprog_init(void) {
 pid_t process_execute(const char* file_name) {
   char* fn_copy;
   tid_t tid;
-  is_child_loaded=false;
+  thread_current()->pcb->is_child_loaded=false;
 
-  if(&thread_current()->pcb<=PHYS_BASE)
   sema_init(&thread_current()->pcb->from_child, 0);
-  else 
-  sema_init(&temporary,0);
+
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page(0);
@@ -79,25 +76,21 @@ pid_t process_execute(const char* file_name) {
   if (tid == TID_ERROR)
     palloc_free_page(fn_copy);
 
- // printf("do-nothing: exit(162)\n");
   /*等待子进程加载完成*/
-//  if(strcmp(thread_current()->name,"main")!=0)
-  if(&thread_current()->pcb<=PHYS_BASE)
-  sema_down(&thread_current()->pcb->from_child);//等不到！！！
-  else
-  sema_down(&temporary);
+  sema_down(&thread_current()->pcb->from_child);
 
   /*释放传递的变量*/
   free(commu);
 
   /*执行表加载失败*/
   lock_acquire(&child_loaded);
-  if(!is_child_loaded)
+  if(!thread_current()->pcb->is_child_loaded)
   {
     lock_release(&child_loaded);
     palloc_free_page(fn_copy);
-    tid=-1;
+    return -1;
   }
+  lock_release(&child_loaded);
   return tid;
 }
 
@@ -109,6 +102,7 @@ uint32_t push_str_into_stack(const char* arg,uint32_t esp)
   memcpy((void*)esp,arg,size);
   return esp;
 }
+
 
 /* A thread function that loads a user process and starts it
    running. */
@@ -151,19 +145,17 @@ static void start_process(void* argvs_) {
     // Continue initializing the PCB as normal
     t->pcb->main_thread = t;
     strlcpy(t->pcb->process_name, t->name, sizeof t->name);
+    }
+
+    /*初始化子进程列表*/
+    struct list* cp=malloc(sizeof(struct list));
+    list_init(cp);
+    t->child_process=cp;
 
     /*设置父子关系*/
-    t->pcb->father=argss->father;
-    list_init(&t->child_process);
-    if(argss->father<=PHYS_BASE)
-    list_push_back(&argss->father->main_thread->child_process,&t->pcb->elem_process);
+    t->father=argss->father;
+    list_push_back(argss->father->child_process,&t->elem_process);
   
-    /*初始化是否已被等待*/
-    t->pcb->waited=false;
-
-    /*初始化父进程与子进程通信的信号量*/
-    sema_init(&t->pcb->wait_for_child,0);
-  }
 
   /* Initialize interrupt frame and load executable. */
   if (success) {
@@ -177,7 +169,7 @@ static void start_process(void* argvs_) {
     if(success)
     {
       lock_acquire(&child_loaded);
-      is_child_loaded=true;
+      thread_current()->father->pcb->is_child_loaded=true;
       lock_release(&child_loaded);
     }
   }
@@ -193,7 +185,7 @@ static void start_process(void* argvs_) {
     addr_argv[args-i-1]=if_.esp;
   }
   
-  /*设置对齐,并把值推入栈*/
+  /*设置对齐*/
    uint8_t stack_align=16-(unsigned)(argc*4+12+total_len+1)%16;
    if_.esp-=stack_align;
 
@@ -236,18 +228,12 @@ static void start_process(void* argvs_) {
   /*释放存地址的空间和字符串*/
   free(addr_argv);
   if (!success) {
-    if(t->pcb->father>PHYS_BASE)
-    sema_up(&temporary);
-    else
-    sema_up(&t->pcb->father->from_child);
+    sema_up(&t->father->pcb->from_child);
     thread_exit();
   }
   
   /*通知父进程*/
-  if(argss->father<=PHYS_BASE)
-  sema_up(&thread_current()->pcb->father->from_child);
-  else
-  sema_up(&temporary);
+  sema_up(&thread_current()->father->pcb->from_child);
 
     /* Start the user process byq simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -264,9 +250,9 @@ static void start_process(void* argvs_) {
 struct thread *get_child_process(pid_t child_tid,struct thread*father)
 {
   struct list_elem*e;
-  for(e=list_begin(&father->elem);e!=list_end(&father->elem);e=list_next(e))
+  for(e=list_begin(father->child_process);e!=list_end(father->child_process);e=list_next(e))
   {
-    struct thread*cp=list_entry(e,struct thread,elem);
+    struct thread*cp=list_entry(e,struct thread,elem_process);
     if(cp->tid==child_tid)
     {
       return cp;
@@ -289,27 +275,30 @@ int process_wait(pid_t child_pid) {
   /*得到父进程*/
   struct thread*cur=thread_current();
 
-  if(cur->pcb>PHYS_BASE)
-  {
-    sema_down(&temporary);
-    return 0;
-  }
-  /*得到子进程*/
   struct thread *cp=get_child_process(child_pid,cur);
 
   /*找不到该子进程*/
   if(!cp)return TID_ERROR;
 
   /*子进程已被等待过*/
-  if(cp->pcb->waited)return TID_ERROR;
+  if(cp->waited)return TID_ERROR;
 
   /*标记子进程已被等待*/
-  cp->pcb->waited=true;
+  cp->waited=true;
+
+  list_remove(&cp->elem_process);
 
   /*等待子进程结束*/
-  sema_down(&cur->pcb->wait_for_child);
+  sema_down(&cur->wait_for_child);
 
-  return cp->status;
+  /*保存进程退出状态*/
+  int es=cp->exit_status;
+
+  /*杀死子进程*/
+  if(cp!=initial_thread)
+  palloc_free_page(cp);
+
+  return es;
 }
 
 /* Free the current process's resources. */
@@ -340,11 +329,7 @@ void process_exit(void) {
   }
 
   /*告诉父进程自己已结束*/
-  if(cur->pcb->father<=PHYS_BASE)
-  sema_up(&cur->pcb->father->wait_for_child);
-  else
-  sema_up(&temporary);
-
+  sema_up(&cur->father->wait_for_child);
   /* Free the PCB of this process and kill this thread
      Avoid race where PCB is freed before t->pcb is set to NULL
      If this happens, then an unfortuantely timed timer interrupt

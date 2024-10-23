@@ -26,11 +26,12 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
    * include it in your final submission.
    */
 
-  /* printf("System call number: %d\n", args[0]); */
+  //  printf("System call number: %d\n", args[0]); 
 
   if (args[0] == SYS_EXIT) {
     f->eax = args[1];
     printf("%s: exit(%d)\n", thread_current()->pcb->process_name, args[1]);
+    thread_current()->exit_status=args[1];
     process_exit();
   }
 
@@ -56,15 +57,19 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
   if(args[0]==SYS_WAIT)
   {
     int ch_pid=args[1];
-    process_wait(ch_pid);
+    f->eax=process_wait(ch_pid);
   }
+
+  /*以下是文件系统调用*/
 
   if(args[0]==SYS_CREATE)
   {
     char*file=args[1];
     int initial_size=args[2];
     if(!check_string(file))
-      f->eax=false;
+      {
+        f->eax=false; 
+      }
     else
     f->eax=filesys_create(file,initial_size);
   }
@@ -186,6 +191,27 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       return;
     }
     f->eax=file_write(tf->f,buffer,size);
+  }
+
+  if(args[0]==SYS_TELL)
+  {
+    int fd=args[1];
+    struct thread_file*tf=find_file(fd);
+    if(tf!=NULL)
+    {
+      f->eax=file_tell(tf->f);
+    }
+  }
+
+  if(args[0]==SYS_SEEK)
+  {
+    int fd=args[1];
+    unsigned pos=args[2];
+    struct thread_file*tf=find_file(fd);
+    if(tf!=NULL)
+    {
+      file_seek(tf->f,pos);
+    }
   }
 }
 

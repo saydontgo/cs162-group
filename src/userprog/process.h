@@ -19,7 +19,7 @@ typedef void (*stub_fun)(pthread_fun, void*);
 
 struct communcate{
    char*fn_copy;
-   struct process*father;
+   struct thread*father;
 };
 
 /* The process control block for a given process. Since
@@ -34,11 +34,8 @@ struct process {
   struct thread* main_thread; /* Pointer to main thread */
 
   pid_t pid;
-  bool waited;                      /*该子进程是否已被等待过*/
+  bool is_child_loaded;             /*子进程是否加载可执行表成功*/
   struct semaphore from_child;      /*调用exec时使用的信号量*/
-  struct semaphore wait_for_child;  /*调用wait时使用的信号量*/
-  struct process *father;            /*进程他爸*/
-  struct list_elem elem_process;
 };
 
 void userprog_init(void);
