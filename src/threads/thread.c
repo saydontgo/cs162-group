@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <random.h>
 #include <stdio.h>
+#include<stdlib.h>
 #include <string.h>
 #include "threads/flags.h"
 #include "threads/interrupt.h"
@@ -117,6 +118,22 @@ void thread_init(void) {
   initial_thread->tid = allocate_tid();
 }
 
+/*如果是用户进程的测试案例，进一步初始化main_thread*/
+void further_thread_init()
+{
+  /*初始化子进程列表*/
+  struct list* cp=malloc(sizeof(struct list));
+  list_init(cp);
+  initial_thread->child_process=cp;
+
+  /*初始化wait系统调用的信号量*/
+  sema_init(&initial_thread->wait_for_child,0);
+
+  /*初始化exec系统调用的信号量*/
+  sema_init(&initial_thread->pcb->from_child,0);
+}
+
+
 /* Starts preemptive thread scheduling by enabling interrupts.
    Also creates the idle thread. */
 void thread_start(void) {
@@ -194,6 +211,12 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   list_init(&t->open_files);
   /*初始化文件描述符*/
   t->cur_file_fd=3;
+
+  /*初始化父进程与子进程通信的信号量*/
+  sema_init(&t->wait_for_child,0);
+
+  /*初始化是否等待过*/
+  t->waited=false;
 
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame(t, sizeof *kf);
@@ -297,6 +320,9 @@ void thread_exit(void) {
      when it calls thread_switch_tail(). */
   intr_disable();
   list_remove(&thread_current()->allelem);
+#ifdef USERPROG
+  free(thread_current()->child_process);
+#endif
   thread_current()->status = THREAD_DYING;
   schedule();
   NOT_REACHED();
@@ -526,15 +552,15 @@ void thread_switch_tail(struct thread* prev) {
   process_activate();
 #endif
 
-  /* If the thread we switched from is dying, destroy its struct
-     thread.  This must happen late so that thread_exit() doesn't
-     pull out the rug under itself.  (We don't free
-     initial_thread because its memory was not obtained via
-     palloc().) */
-  if (prev != NULL && prev->status == THREAD_DYING && prev != initial_thread) {
-    ASSERT(prev != cur);
-    palloc_free_page(prev);
-  }
+  // /* If the thread we switched from is dying, destroy its struct
+  //    thread.  This must happen late so that thread_exit() doesn't
+  //    pull out the rug under itself.  (We don't free
+  //    initial_thread because its memory was not obtained via
+  //    palloc().) */
+  // if (prev != NULL && prev->status == THREAD_DYING && prev != initial_thread&&prev->father==initial_thread) {
+  //   ASSERT(prev != cur);
+  //   palloc_free_page(prev);
+  // }
 }
 
 /* Schedules a new thread.  At entry, interrupts must be off and

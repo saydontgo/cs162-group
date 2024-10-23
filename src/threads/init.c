@@ -85,7 +85,7 @@ int main(void) {
   argv = parse_options(argv);
 
   /* Initialize ourselves as a thread so we can use locks,
-     then enable console locking. */
+    then enable console locking. */
   thread_init();
   console_init();
 
@@ -121,6 +121,7 @@ int main(void) {
 #ifdef USERPROG
   /* Give main thread a minimal PCB so it can launch the first process */
   userprog_init();
+  further_thread_init();
 #endif
 
 #ifdef FILESYS

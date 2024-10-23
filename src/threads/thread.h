@@ -82,7 +82,9 @@ typedef int tid_t;
    ready state is on the run queue, whereas only a thread in the
    blocked state is on a semaphore wait list. */
 
-  
+/* Initial thread, the thread running init.c:main(). */
+static struct thread* initial_thread;
+
 struct thread_file{
   /*一个过渡结构体*/
   int fd;
@@ -102,14 +104,21 @@ struct thread {
   int cur_file_fd;                  /*下一个使用的文件描述符*/
   struct list open_files;           /*所有打开的文件*/
 
+  int exit_status;                  /*退出状态*/
+
   /* Shared between thread.c and synch.c. */
   struct list_elem elem; /* List element. */
 
 #ifdef USERPROG
   /* Owned by process.c. */
-  struct list child_process;        /*子进程的list*/
+  struct list*child_process;        /*子进程的list*/
   struct process* pcb; /* Process control block if this thread is a userprog */
+  struct list_elem elem_process;
+  struct thread *father;            /*进程他爸*/
 #endif
+
+  struct semaphore wait_for_child;  /*调用wait时使用的信号量*/
+  bool waited;                      /*该子进程是否已被等待过*/
 
   /* Owned by thread.c. */
   unsigned magic; /* Detects stack overflow. */
