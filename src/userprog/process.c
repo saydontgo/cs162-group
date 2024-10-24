@@ -87,8 +87,8 @@ pid_t process_execute(const char* file_name) {
   if(!thread_current()->pcb->is_child_loaded)
   {
     lock_release(&child_loaded);
-    palloc_free_page(fn_copy);
-    return -1;
+//    palloc_free_page(fn_copy);
+    return TID_ERROR;
   }
   lock_release(&child_loaded);
   return tid;

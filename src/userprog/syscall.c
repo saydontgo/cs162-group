@@ -1,6 +1,7 @@
 #include "userprog/syscall.h"
 #include <stdio.h>
 #include <syscall-nr.h>
+#include<float.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "userprog/process.h"
@@ -13,11 +14,18 @@
 
 static void syscall_handler(struct intr_frame*);
 bool check_string(const char*);
+bool check_ptr(uint32_t*);
 struct thread_file*find_file(int);
 void syscall_init(void) { intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall"); }
-
+void sys_exit(int);
 static void syscall_handler(struct intr_frame* f UNUSED) {
-  uint32_t* args = ((uint32_t*)f->esp);
+  if(!check_ptr((uint32_t*)f->esp))
+  {
+    sys_exit(-1);
+    return;
+  }
+
+  uint32_t*args = ((uint32_t*)f->esp);
 
   /*
    * The following print statement, if uncommented, will print out the syscall
@@ -26,17 +34,23 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
    * include it in your final submission.
    */
 
-  //  printf("System call number: %d\n", args[0]); 
+   printf("System call number: %d\n", args[0]);
 
   if (args[0] == SYS_EXIT) {
+    if(!check_ptr(&args[1]))
+    f->eax=-1;
+    else
     f->eax = args[1];
-    printf("%s: exit(%d)\n", thread_current()->pcb->process_name, args[1]);
-    thread_current()->exit_status=args[1];
-    process_exit();
+    sys_exit(f->eax);
   }
 
   if(args[0]==SYS_PRACTICE)
   {
+    if(!check_ptr(&args[1]))
+    {
+      sys_exit(-1);
+      return;
+    }
     f->eax=args[1]+1;
   }
 
@@ -47,15 +61,21 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 
   if(args[0]==SYS_EXEC)
   {
-    char*cmd=args[1];
-    if(!check_string(cmd))
-    f->eax=-1;
-    else
-    f->eax=process_execute(cmd);
+    if(!check_ptr(&args[1])||!check_string(args[1]))
+    {
+      sys_exit(-1);
+      return;
+    }
+    f->eax=process_execute(args[1]);
   }
 
   if(args[0]==SYS_WAIT)
   {
+    if(!check_ptr(&args[1]))
+    {
+      sys_exit(-1);
+      return;
+    }
     int ch_pid=args[1];
     f->eax=process_wait(ch_pid);
   }
@@ -64,18 +84,23 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 
   if(args[0]==SYS_CREATE)
   {
+    if(!check_ptr(&args[1])||!check_ptr(&args[2])||!check_string(args[1]))
+    {
+      sys_exit(-1);
+      return;
+    }
     char*file=args[1];
     int initial_size=args[2];
-    if(!check_string(file))
-      {
-        f->eax=false; 
-      }
-    else
     f->eax=filesys_create(file,initial_size);
   }
 
   if(args[0]==SYS_REMOVE)
   {
+    if(!check_ptr(&args[1]))
+    {
+      sys_exit(-1);
+      return;
+    }
     char*file=args[1];
     if(!check_string(file))
     {
@@ -88,14 +113,13 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 
   if(args[0]==SYS_OPEN)
   {
-    char*file=args[1];
-    struct thread*cur=thread_current();
-
-    if(!check_string(file))
+    if(!check_ptr(&args[1])||!check_string(args[1]))
     {
-      f->eax=-1;
+      sys_exit(-1);
       return;
     }
+    char*file=args[1];
+    struct thread*cur=thread_current();
 
     struct thread_file* tmp=malloc(sizeof(struct thread_file));
     tmp->fd=cur->cur_file_fd++;
@@ -111,6 +135,11 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 
   if(args[0]==SYS_CLOSE)
   {
+    if(!check_ptr(&args[1]))
+    {
+      sys_exit(-1);
+      return;
+    }
     int fd=args[1];
     struct thread_file*tf=find_file(fd);
     if(!tf)
@@ -124,6 +153,11 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 
   if(args[0]==SYS_FILESIZE)
   {
+    if(!check_ptr(&args[1]))
+    {
+      sys_exit(-1);
+      return;
+    }
     int fd=args[1];
     struct thread_file*tf=find_file(fd);
     if(!tf)
@@ -136,13 +170,18 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 
   if(args[0]==SYS_READ)
   {
+    if(!check_ptr(&args[1])||!check_ptr(&args[2])||!check_ptr(&args[3]))
+    {
+      sys_exit(-1);
+      return;
+    }
     int fd=args[1];
     char*buffer=args[2];
     int size=args[3];
 
     if(!check_string(buffer))
     {
-      f->eax= -1;
+      sys_exit(-1);
       return;
     }
 
@@ -168,13 +207,18 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 
   if(args[0]==SYS_WRITE)
   {
+    if(!check_ptr(&args[1])||!check_ptr(&args[2])||!check_ptr(&args[3]))
+    {
+      sys_exit(-1);
+      return;
+    }
     int fd=args[1];
     char*buffer=args[2];
     int size=args[3];
 
     if(!check_string(buffer))
     {
-      f->eax= -1;
+      sys_exit(-1);
       return;
     }
 
@@ -195,6 +239,11 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 
   if(args[0]==SYS_TELL)
   {
+    if(!check_ptr(&args[1]))
+    {
+      sys_exit(-1);
+      return;
+    }
     int fd=args[1];
     struct thread_file*tf=find_file(fd);
     if(tf!=NULL)
@@ -205,6 +254,11 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 
   if(args[0]==SYS_SEEK)
   {
+    if(!check_ptr(&args[1])||!check_ptr(&args[2]))
+    {
+      sys_exit(-1);
+      return;
+    }
     int fd=args[1];
     unsigned pos=args[2];
     struct thread_file*tf=find_file(fd);
@@ -212,6 +266,17 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
     {
       file_seek(tf->f,pos);
     }
+  }
+
+  if(args[0]==SYS_COMPUTE_E)
+  {
+    if(!check_ptr(&args[1]))
+    {
+      sys_exit(-1);
+      return;
+    }
+
+    f->eax=sys_sum_to_e(args[1]);
   }
 }
 
@@ -223,7 +288,16 @@ bool check_string(const char*being_checked)
   return false;
   for(;being_checked[i]!='\0';i++)
   {
-    if(being_checked[i+1]>PHYS_BASE||!is_user_vaddr(&being_checked[i+1])||!pagedir_get_page(thread_current()->pcb->pagedir,&being_checked[i+1]))
+    if(!is_user_vaddr(&being_checked[i+1])||!pagedir_get_page(thread_current()->pcb->pagedir,&being_checked[i+1]))
+    return false;
+  }
+  return true;
+}
+bool check_ptr(uint32_t* unchecked)
+{
+  for(int i=0;i<4;i++)
+  {
+    if(!is_user_vaddr(unchecked+i)||!pagedir_get_page(thread_current()->pcb->pagedir,unchecked+i))
     return false;
   }
   return true;
@@ -239,4 +313,11 @@ struct thread_file*find_file(int fd)
     return tmp;
   }
   return NULL;
+}
+
+void sys_exit(int exit_status)
+{
+  printf("%s: exit(%d)\n", thread_current()->pcb->process_name, exit_status);
+  thread_current()->exit_status=exit_status;
+  process_exit();
 }
