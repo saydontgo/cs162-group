@@ -54,6 +54,11 @@ static long long user_ticks;   /* # of timer ticks in user programs. */
 #define TIME_SLICE 4          /* # of timer ticks to give each thread. */
 static unsigned thread_ticks; /* # of timer ticks since last yield. */
 
+/*浮点数相关函数*/
+void fpu_init();
+// void fpu_save();
+// void fpu_restore();
+
 static void init_thread(struct thread*, const char* name, int priority);
 static bool is_thread(struct thread*) UNUSED;
 static void* alloc_frame(struct thread*, size_t size);
@@ -232,6 +237,9 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   sf = alloc_frame(t, sizeof *sf);
   sf->eip = switch_entry;
   sf->ebp = 0;
+
+  /*初始化fpu*/
+  fpu_init(t);
 
   /* Add to run queue. */
   thread_unblock(t);
@@ -578,9 +586,20 @@ static void schedule(void) {
   ASSERT(intr_get_level() == INTR_OFF);
   ASSERT(cur->status != THREAD_RUNNING);
   ASSERT(is_thread(next));
+  
 
   if (cur != next)
+  {
+  asm volatile (
+      "fsave %0"
+      :: "m" (cur->fs.fpu_registers[0]) // 将 FPU 状态保存到 fpu 结构中
+  );
+    asm volatile (
+      "frstor %0"
+      :: "m" (next->fs.fpu_registers[0]) // 将 FPU 状态保存到 fpu 结构中
+  );
     prev = switch_threads(cur, next);
+  }
   thread_switch_tail(prev);
 }
 
@@ -599,3 +618,13 @@ static tid_t allocate_tid(void) {
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof(struct thread, stack);
+
+/*初始化fpu*/
+void fpu_init(struct thread*new)
+{  
+  struct thread *cur=thread_current();
+  asm volatile("fsave %0"::"m"(cur->fs.fpu_registers[0]));
+  asm volatile("fninit");
+  asm volatile("fsave %0"::"m"(new->fs.fpu_registers[0]));
+  asm volatile("frstor %0"::"m"(cur->fs.fpu_registers[0]));
+}

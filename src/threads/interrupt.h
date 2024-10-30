@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include"threads/thread.h"
 
 /* Interrupts on or off? */
 enum intr_level {
@@ -16,7 +17,7 @@ enum intr_level intr_enable(void);
 enum intr_level intr_disable(void);
 
 /* Interrupt stack frame. */
-struct intr_frame {
+struct intr_frame {  
   /* Pushed by intr_entry in intr-stubs.S.
        These are the interrupted task's saved registers. */
   uint32_t edi;       /* Saved EDI. */
@@ -31,7 +32,7 @@ struct intr_frame {
   uint16_t fs, : 16;  /* Saved FS segment register. */
   uint16_t es, : 16;  /* Saved ES segment register. */
   uint16_t ds, : 16;  /* Saved DS segment register. */
-
+  
   /* Pushed by intrNN_stub in intr-stubs.S. */
   uint32_t vec_no; /* Interrupt vector number. */
 
@@ -51,6 +52,7 @@ struct intr_frame {
   uint32_t eflags;   /* Saved CPU flags. */
   void* esp;         /* Saved stack pointer. */
   uint16_t ss, : 16; /* Data segment for esp. */
+
 };
 
 typedef void intr_handler_func(struct intr_frame*);

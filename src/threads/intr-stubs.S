@@ -22,7 +22,9 @@ intr_entry:
 	pushl %es
 	pushl %fs
 	pushl %gs
+
 	pushal
+
 
 	/* Set up kernel environment. */
 	cld			/* String instructions go upward. */
@@ -49,14 +51,16 @@ intr_entry:
 .globl intr_exit
 .func intr_exit
 intr_exit:
+
 	/* Restore caller's registers. */
 	popal
+
 	popl %gs
 	popl %fs
 	popl %es
 	popl %ds
 
-        /* Discard `struct intr_frame' vec_no, error_code,
+        /* Discard 'struct intr_frame' vec_no, error_code,
            frame_pointer members. */
 	addl $12, %esp
 

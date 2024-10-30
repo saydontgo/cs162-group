@@ -86,10 +86,14 @@ typedef int tid_t;
 static struct thread* initial_thread;
 
 struct thread_file{
-  /*一个过渡结构体*/
+  /*一个文件系统相关的过渡结构体*/
   int fd;
   struct file*f;
   struct list_elem elem_tf;
+};
+
+struct fpu_state{
+  uint8_t fpu_registers[108];
 };
 
 struct thread {
@@ -115,10 +119,12 @@ struct thread {
   struct process* pcb; /* Process control block if this thread is a userprog */
   struct list_elem elem_process;
   struct thread *father;            /*进程他爸*/
-#endif
-
   struct semaphore wait_for_child;  /*调用wait时使用的信号量*/
   bool waited;                      /*该子进程是否已被等待过*/
+#endif
+
+  /*浮点数状态保存*/
+  struct fpu_state fs;  /*当前进程的fpu状态*/
 
   /* Owned by thread.c. */
   unsigned magic; /* Detects stack overflow. */
@@ -170,5 +176,10 @@ int thread_get_nice(void);
 void thread_set_nice(int);
 int thread_get_recent_cpu(void);
 int thread_get_load_avg(void);
+
+/*初始化浮点数fpu*/
+void fpu_init();
+// void fpu_save();
+//void fpu_restore();
 
 #endif /* threads/thread.h */
