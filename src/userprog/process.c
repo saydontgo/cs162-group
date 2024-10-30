@@ -91,6 +91,8 @@ pid_t process_execute(const char* file_name) {
     return TID_ERROR;
   }
   lock_release(&child_loaded);
+
+  /*初始化fpu*/
   return tid;
 }
 
@@ -233,7 +235,7 @@ static void start_process(void* argvs_) {
   }
   
   /*通知父进程*/
-  sema_up(&thread_current()->father->pcb->from_child);
+  sema_up(&t->father->pcb->from_child);
 
     /* Start the user process byq simulating a return from an
      interrupt, implemented by intr_exit (in

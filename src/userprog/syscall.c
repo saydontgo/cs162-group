@@ -34,7 +34,7 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
    * include it in your final submission.
    */
 
-   printf("System call number: %d\n", args[0]);
+ //  printf("System call number: %d\n", args[0]);
 
   if (args[0] == SYS_EXIT) {
     if(!check_ptr(&args[1]))
@@ -275,8 +275,15 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       sys_exit(-1);
       return;
     }
-
+    asm volatile (
+      "fsave %0"
+      :: "m" (thread_current()->fs.fpu_registers[0]) // 将 FPU 状态保存到 fpu 结构中
+  );
     f->eax=sys_sum_to_e(args[1]);
+    asm volatile (
+      "frstor %0"
+      :: "m" (thread_current()->fs.fpu_registers[0]) // 将 FPU 状态保存到 fpu 结构中
+  );
   }
 }
 
