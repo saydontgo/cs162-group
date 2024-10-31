@@ -80,7 +80,6 @@ static void kill(struct intr_frame* f) {
              intr_name(f->vec_no));
       intr_dump_frame(f);
       sys_exit(-1);
-      process_exit();
       NOT_REACHED();
 
     case SEL_KCSEG:

@@ -22,7 +22,6 @@
 #include "threads/vaddr.h"
 
 static struct semaphore temporary;
-struct lock child_loaded;
 static thread_func start_process NO_RETURN;
 static thread_func start_pthread NO_RETURN;
 static bool load(const char* file_name, void (**eip)(void), void** esp);
@@ -35,7 +34,6 @@ bool setup_thread(void (**eip)(void), void** esp);
 void userprog_init(void) {
   struct thread* t = thread_current();
   bool success;
-  lock_init(&child_loaded);
   /* Allocate process control block
      It is imoprtant that this is a call to calloc and not malloc,
      so that t->pcb->pagedir is guaranteed to be NULL (the kernel's
@@ -74,23 +72,24 @@ pid_t process_execute(const char* file_name) {
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create(file_name, PRI_DEFAULT, start_process, commu);
   if (tid == TID_ERROR)
+  {
     palloc_free_page(fn_copy);
+    /*释放传递的变量*/
+    free(commu);
+    return tid;
+  }
 
   /*等待子进程加载完成*/
   sema_down(&thread_current()->pcb->from_child);
-
+  
   /*释放传递的变量*/
   free(commu);
 
   /*执行表加载失败*/
-  lock_acquire(&child_loaded);
   if(!thread_current()->pcb->is_child_loaded)
   {
-    lock_release(&child_loaded);
-//    palloc_free_page(fn_copy);
     return TID_ERROR;
   }
-  lock_release(&child_loaded);
 
   /*初始化fpu*/
   return tid;
@@ -170,14 +169,12 @@ static void start_process(void* argvs_) {
     /*加载成功*/
     if(success)
     {
-      lock_acquire(&child_loaded);
       thread_current()->father->pcb->is_child_loaded=true;
-      lock_release(&child_loaded);
     }
   }
 
   uint32_t *addr_argv=malloc(sizeof(uint32_t)*MAXARGV);
-  if(!addr_argv)success=!success;
+  if(!addr_argv)success=false;
   if(success){
 
     /* 将命令行的所有参数推入栈*/
@@ -214,6 +211,9 @@ static void start_process(void* argvs_) {
   if_.esp-=4;
 
   }
+
+  /* Clean up. Exit on failure or jump to userspace */
+  palloc_free_page(argvs);
  
   /* Handle failure with succesful PCB malloc. Must free the PCB */
   if (!success && pcb_success) {
@@ -225,10 +225,10 @@ static void start_process(void* argvs_) {
     free(pcb_to_free);
   }
 
-  /* Clean up. Exit on failure or jump to userspace */
-  palloc_free_page(argvs);
   /*释放存地址的空间和字符串*/
+  if(!addr_argv)
   free(addr_argv);
+
   if (!success) {
     sema_up(&t->father->pcb->from_child);
     thread_exit();
@@ -288,10 +288,11 @@ int process_wait(pid_t child_pid) {
   /*标记子进程已被等待*/
   cp->waited=true;
 
-  list_remove(&cp->elem_process);
-
   /*等待子进程结束*/
   sema_down(&cur->wait_for_child);
+
+  /*移除子进程*/
+  list_remove(&cp->elem_process);
 
   /*保存进程退出状态*/
   int es=cp->exit_status;

@@ -1,5 +1,6 @@
 #include "userprog/syscall.h"
 #include <stdio.h>
+#include<string.h>
 #include <syscall-nr.h>
 #include<float.h>
 #include "threads/interrupt.h"
@@ -34,7 +35,7 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
    * include it in your final submission.
    */
 
- //  printf("System call number: %d\n", args[0]);
+  //printf("System call number: %d\n", args[0]);
 
   if (args[0] == SYS_EXIT) {
     if(!check_ptr(&args[1]))
@@ -123,10 +124,12 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 
     struct thread_file* tmp=malloc(sizeof(struct thread_file));
     tmp->fd=cur->cur_file_fd++;
+    strlcpy(tmp->name,file,sizeof(tmp->name));
     tmp->f=filesys_open(file);
     if(tmp->f==NULL)
     {
       f->eax=-1;
+      free(tmp);//必须释放资源
       return;
     }
     list_push_back(&cur->open_files,&tmp->elem_tf);
@@ -234,6 +237,11 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       f->eax=-1;
       return;
     }
+    if(is_executing(tf->name))
+    {
+      f->eax=0;
+      return;
+    }
     f->eax=file_write(tf->f,buffer,size);
   }
 
@@ -321,7 +329,6 @@ struct thread_file*find_file(int fd)
   }
   return NULL;
 }
-
 void sys_exit(int exit_status)
 {
   printf("%s: exit(%d)\n", thread_current()->pcb->process_name, exit_status);

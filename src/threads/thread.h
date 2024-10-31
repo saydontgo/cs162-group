@@ -90,6 +90,7 @@ struct thread_file{
   int fd;
   struct file*f;
   struct list_elem elem_tf;
+  char name[16];
 };
 
 struct fpu_state{
@@ -121,6 +122,7 @@ struct thread {
   struct thread *father;            /*进程他爸*/
   struct semaphore wait_for_child;  /*调用wait时使用的信号量*/
   bool waited;                      /*该子进程是否已被等待过*/
+  
 #endif
 
   /*浮点数状态保存*/
@@ -161,6 +163,7 @@ void thread_unblock(struct thread*);
 struct thread* thread_current(void);
 tid_t thread_tid(void);
 const char* thread_name(void);
+bool is_executing(const char*);  //判断一个线程是否正在被执行
 
 void thread_exit(void) NO_RETURN;
 void thread_yield(void);
@@ -179,7 +182,5 @@ int thread_get_load_avg(void);
 
 /*初始化浮点数fpu*/
 void fpu_init();
-// void fpu_save();
-//void fpu_restore();
 
 #endif /* threads/thread.h */

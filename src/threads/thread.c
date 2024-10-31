@@ -12,6 +12,7 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "filesys/file.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -56,8 +57,6 @@ static unsigned thread_ticks; /* # of timer ticks since last yield. */
 
 /*浮点数相关函数*/
 void fpu_init();
-// void fpu_save();
-// void fpu_restore();
 
 static void init_thread(struct thread*, const char* name, int priority);
 static bool is_thread(struct thread*) UNUSED;
@@ -318,6 +317,34 @@ struct thread* thread_current(void) {
 /* Returns the running thread's tid. */
 tid_t thread_tid(void) { return thread_current()->tid; }
 
+/*判断一个线程是否正在被执行*/
+bool is_executing(const char*name)
+{
+  struct list_elem*e;
+  for(e=list_begin(&all_list);e!=list_end(&all_list);e=list_next(e))
+  {
+    struct thread*tmp=list_entry(e,struct thread,allelem);
+    if(strcmp(tmp->name,name)==0)return true;
+  }
+  return false;
+}
+
+/*释放所有未close的文件*/
+void free_all_open_files()
+{
+  struct list_elem*e;
+  struct thread*cur=thread_current();
+  for(e=list_begin(&cur->open_files);e!=list_end(&cur->open_files);)
+  {
+    struct thread_file*to_be_free=list_entry(e,struct thread_file,elem_tf);
+    struct list_elem*tmp=e;
+    e=list_next(e);
+    file_close(to_be_free->f);
+    list_remove(tmp);
+    free(to_be_free);
+  }
+  
+}
 /* Deschedules the current thread and destroys it.  Never
    returns to the caller. */
 void thread_exit(void) {
@@ -331,6 +358,7 @@ void thread_exit(void) {
 #ifdef USERPROG
   free(thread_current()->child_process);
 #endif
+  free_all_open_files();
   thread_current()->status = THREAD_DYING;
   schedule();
   NOT_REACHED();
