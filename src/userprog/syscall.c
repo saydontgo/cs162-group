@@ -223,7 +223,6 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       sys_exit(-1);
       return;
     }
-
     if(fd==STDOUT_FILENO)
     {
       putbuf(buffer,size);

@@ -24,7 +24,7 @@
 
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
-static struct list fifo_ready_list;
+static struct list ready_list;
 
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
@@ -112,7 +112,7 @@ void thread_init(void) {
   ASSERT(intr_get_level() == INTR_OFF);
 
   lock_init(&tid_lock);
-  list_init(&fifo_ready_list);
+  list_init(&ready_list);
   list_init(&all_list);
 
   /* Set up a thread structure for the running thread. */
@@ -243,6 +243,15 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   /* Add to run queue. */
   thread_unblock(t);
 
+  if(active_sched_policy==SCHED_PRIO&&t->priority>thread_current()->priority)
+  {
+    struct thread*cur=thread_current();
+    enum intr_level old_level=intr_disable();
+    thread_enqueue(cur);
+    cur->status=THREAD_READY;
+    schedule();
+    intr_set_level(old_level);
+  }
   return tid;
 }
 
@@ -259,7 +268,24 @@ void thread_block(void) {
   thread_current()->status = THREAD_BLOCKED;
   schedule();
 }
+/*按照优先级插入线程*/
+void priority_insert_threads(struct thread *cur)
+{
+  ASSERT(&ready_list!=NULL);
+  ASSERT(&cur->elem!=NULL);
 
+  struct list_elem*e;
+  for(e=list_begin(&ready_list);e!=list_end(&ready_list);e=list_next(e))
+  {
+    struct thread *tmp=list_entry(e,struct thread,elem);
+    if(tmp->priority<cur->priority)
+    {
+      list_insert(e,&cur->elem);
+      return;
+    }
+  }
+  list_push_back(&ready_list,&cur->elem);
+}
 /* Places a thread on the ready structure appropriate for the
    current active scheduling policy.
    
@@ -269,7 +295,9 @@ static void thread_enqueue(struct thread* t) {
   ASSERT(is_thread(t));
 
   if (active_sched_policy == SCHED_FIFO)
-    list_push_back(&fifo_ready_list, &t->elem);
+    list_push_back(&ready_list,&t->elem);
+  else if (active_sched_policy == SCHED_PRIO)
+    priority_insert_threads(t);
   else
     PANIC("Unimplemented scheduling policy value: %d", active_sched_policy);
 }
@@ -492,11 +520,7 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   memset(t, 0, sizeof *t);
   t->status = THREAD_BLOCKED;
 
-  /*防止空格后面的参数打扰*/
-  int i=0;
-  while(name[i++]!=' ');
-
-  strlcpy(t->name, name, i);
+  strlcpy(t->name, name, sizeof t->name);
   t->stack = (uint8_t*)t + PGSIZE;
   t->priority = priority;
   t->pcb = NULL;
@@ -520,15 +544,18 @@ static void* alloc_frame(struct thread* t, size_t size) {
 
 /* First-in first-out scheduler */
 static struct thread* thread_schedule_fifo(void) {
-  if (!list_empty(&fifo_ready_list))
-    return list_entry(list_pop_front(&fifo_ready_list), struct thread, elem);
+  if (!list_empty(&ready_list))
+    return list_entry(list_pop_front(&ready_list), struct thread, elem);
   else
     return idle_thread;
 }
 
 /* Strict priority scheduler */
 static struct thread* thread_schedule_prio(void) {
-  PANIC("Unimplemented scheduler policy: \"-sched=prio\"");
+  if (!list_empty(&ready_list))
+    return list_entry(list_pop_front(&ready_list), struct thread, elem);
+  else
+    return idle_thread;
 }
 
 /* Fair priority scheduler */
@@ -554,6 +581,41 @@ static struct thread* thread_schedule_reserved(void) {
    idle_thread. */
 static struct thread* next_thread_to_run(void) {
   return (scheduler_jump_table[active_sched_policy])();
+}
+
+/*让当前进程休眠ticks时间*/
+void thread_sleep(int64_t ticks)
+{
+  if(ticks<=0)return;
+  struct thread*cur=thread_current();
+
+  enum intr_level old_level=intr_disable(); //关闭中断
+  if(cur!=idle_thread)
+  {
+    cur->status=THREAD_SLEEP;
+    cur->wake_time=timer_ticks()+ticks;
+    schedule();
+  }
+  intr_set_level(old_level);  //恢复中断
+}
+
+/*检查是否有休眠进程*/
+void wakeup_potential_sleep_thread()
+{
+  struct list_elem*e;
+  int64_t cur_time=timer_ticks();
+  for(e=list_begin(&all_list);e!=list_end(&all_list);e=list_next(e))
+  {
+    struct thread*tmp=list_entry(e,struct thread,allelem);
+    enum intr_level old_level=intr_disable(); //关闭中断
+    if(tmp->status==THREAD_SLEEP&&tmp->wake_time<=cur_time)
+    {
+      /*唤醒进程*/
+      tmp->status=THREAD_READY;
+      thread_enqueue(tmp);
+    }
+    intr_set_level(old_level);//关闭中断
+  }
 }
 
 /* Completes a thread switch by activating the new thread's page

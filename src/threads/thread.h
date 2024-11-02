@@ -12,7 +12,8 @@ enum thread_status {
   THREAD_RUNNING, /* Running thread. */
   THREAD_READY,   /* Not running but ready to run. */
   THREAD_BLOCKED, /* Waiting for an event to trigger. */
-  THREAD_DYING    /* About to be destroyed. */
+  THREAD_DYING,   /* About to be destroyed. */
+  THREAD_SLEEP    /* 进程休眠*/
 };
 
 /* Thread identifier type.
@@ -104,6 +105,7 @@ struct thread {
   char name[16];             /* Name (for debugging purposes). */
   uint8_t* stack;            /* Saved stack pointer. */
   int priority;              /* Priority. */
+  int64_t wake_time;        /* 苏醒时间*/
   struct list_elem allelem;  /* List element for all threads list. */
 
   int cur_file_fd;                  /*下一个使用的文件描述符*/

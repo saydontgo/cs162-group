@@ -64,20 +64,34 @@ pid_t process_execute(const char* file_name) {
     return TID_ERROR;
   strlcpy(fn_copy, file_name, PGSIZE);
 
+  /*处理进程名字问题*/
+  char*fn_copy_name = palloc_get_page(0);
+  if (fn_copy_name == NULL)
+    return TID_ERROR;
+  /*防止空格后面的参数改变进程名字*/
+  int i=0;
+  while(file_name[i++]!=' ');
+  strlcpy(fn_copy_name, file_name, i);
+  
+
   /*分配变量以传进子进程*/
   struct communcate*commu=malloc(sizeof(struct communcate));
   commu->father=thread_current();
   commu->fn_copy=fn_copy;
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create(file_name, PRI_DEFAULT, start_process, commu);
+  tid = thread_create(fn_copy_name, PRI_DEFAULT, start_process, commu);
   if (tid == TID_ERROR)
   {
     palloc_free_page(fn_copy);
+    palloc_free_page(fn_copy_name);
     /*释放传递的变量*/
     free(commu);
     return tid;
   }
+  
+  /*释放得到名字的变量*/
+  palloc_free_page(fn_copy_name);
 
   /*等待子进程加载完成*/
   sema_down(&thread_current()->pcb->from_child);
