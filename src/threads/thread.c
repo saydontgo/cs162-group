@@ -179,6 +179,7 @@ void thread_print_stats(void) {
          user_ticks);
 }
 
+
 /* Creates a new kernel thread named NAME with the given initial
    PRIORITY, which executes FUNCTION passing AUX as the argument,
    and adds it to the ready queue.  Returns the thread identifier
@@ -211,6 +212,10 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   /* Initialize thread. */
   init_thread(t, name, priority);
   tid = t->tid = allocate_tid();
+
+  /*初始化可能正在等待的锁*/
+  t->lock=NULL;
+
   /*初始化文件链表*/
   list_init(&t->open_files);
   /*初始化文件描述符*/
@@ -240,18 +245,9 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   /*初始化fpu*/
   fpu_init(t);
 
-  /* Add to run queue. */
+  /* Add to run queue.*/
   thread_unblock(t);
 
-  if(active_sched_policy==SCHED_PRIO&&t->priority>thread_current()->priority)
-  {
-    struct thread*cur=thread_current();
-    enum intr_level old_level=intr_disable();
-    thread_enqueue(cur);
-    cur->status=THREAD_READY;
-    schedule();
-    intr_set_level(old_level);
-  }
   return tid;
 }
 
@@ -269,13 +265,13 @@ void thread_block(void) {
   schedule();
 }
 /*按照优先级插入线程*/
-void priority_insert_threads(struct thread *cur)
+void priority_insert_threads(struct thread *cur,struct list*list)
 {
-  ASSERT(&ready_list!=NULL);
+  ASSERT(list!=NULL);
   ASSERT(&cur->elem!=NULL);
 
   struct list_elem*e;
-  for(e=list_begin(&ready_list);e!=list_end(&ready_list);e=list_next(e))
+  for(e=list_begin(list);e!=list_end(list);e=list_next(e))
   {
     struct thread *tmp=list_entry(e,struct thread,elem);
     if(tmp->priority<cur->priority)
@@ -284,7 +280,7 @@ void priority_insert_threads(struct thread *cur)
       return;
     }
   }
-  list_push_back(&ready_list,&cur->elem);
+  list_push_back(list,&cur->elem);
 }
 /* Places a thread on the ready structure appropriate for the
    current active scheduling policy.
@@ -297,11 +293,33 @@ static void thread_enqueue(struct thread* t) {
   if (active_sched_policy == SCHED_FIFO)
     list_push_back(&ready_list,&t->elem);
   else if (active_sched_policy == SCHED_PRIO)
-    priority_insert_threads(t);
+    priority_insert_threads(t,&ready_list);
   else
     PANIC("Unimplemented scheduling policy value: %d", active_sched_policy);
 }
 
+/*找到一个列表中优先级最大的线程并将其出队*/
+struct thread*find_highest_priority_and_dequeue(struct list*pri_list)
+{
+  ASSERT(pri_list!=NULL);
+  int highest_pri=-1;
+  struct thread*highest=NULL;
+  struct list_elem*out;
+  struct list_elem*e;
+  for(e=list_begin(pri_list);e!=list_end(pri_list);e=list_next(e))
+  {
+    struct thread*tmp=list_entry(e,struct thread,elem);
+    if(tmp->priority>highest_pri)
+    {
+      highest_pri=tmp->priority;
+      highest=tmp;
+      out=e;
+    }
+  }
+  ASSERT(highest_pri!=-1);
+  list_remove(out);
+  return highest;
+}
 /* Transitions a blocked thread T to the ready-to-run state.
    This is an error if T is not blocked.  (Use thread_yield() to
    make the running thread ready.)
@@ -319,6 +337,13 @@ void thread_unblock(struct thread* t) {
   ASSERT(t->status == THREAD_BLOCKED);
   thread_enqueue(t);
   t->status = THREAD_READY;
+  struct thread*cur=thread_current();
+  if(cur!=idle_thread&&active_sched_policy==SCHED_PRIO&&t->priority>cur->priority)
+  {
+    thread_enqueue(cur);
+    cur->status=THREAD_READY;
+    schedule();
+  }
   intr_set_level(old_level);
 }
 
@@ -655,7 +680,7 @@ void thread_switch_tail(struct thread* prev) {
   //    pull out the rug under itself.  (We don't free
   //    initial_thread because its memory was not obtained via
   //    palloc().) */
-  // if (prev != NULL && prev->status == THREAD_DYING && prev != initial_thread&&prev->father==initial_thread) {
+  // if (prev != NULL && prev->status == THREAD_DYING && prev != initial_thread/*&&prev->father==initial_thread*/) {
   //   ASSERT(prev != cur);
   //   palloc_free_page(prev);
   // }
@@ -676,7 +701,6 @@ static void schedule(void) {
   ASSERT(intr_get_level() == INTR_OFF);
   ASSERT(cur->status != THREAD_RUNNING);
   ASSERT(is_thread(next));
-  
 
   if (cur != next)
   {

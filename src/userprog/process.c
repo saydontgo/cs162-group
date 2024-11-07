@@ -68,7 +68,7 @@ pid_t process_execute(const char* file_name) {
   char*fn_copy_name = palloc_get_page(0);
   if (fn_copy_name == NULL)
     return TID_ERROR;
-  /*防止空格后面的参数改变进程名字*/
+  /*防止进程名字后面的参数改变进程名字*/
   int i=0;
   while(file_name[i++]!=' ');
   strlcpy(fn_copy_name, file_name, i);

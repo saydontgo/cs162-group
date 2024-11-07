@@ -62,8 +62,8 @@ void sema_down(struct semaphore* sema) {
   ASSERT(!intr_context());
 
   old_level = intr_disable();
-  while (sema->value == 0) {
-    list_push_back(&sema->waiters, &thread_current()->elem);
+  while (sema->value == 0) {  
+    list_push_back(&sema->waiters,&thread_current()->elem);
     thread_block();
   }
   sema->value--;
@@ -102,9 +102,12 @@ void sema_up(struct semaphore* sema) {
   ASSERT(sema != NULL);
 
   old_level = intr_disable();
-  if (!list_empty(&sema->waiters))
-    thread_unblock(list_entry(list_pop_front(&sema->waiters), struct thread, elem));
   sema->value++;
+  if (!list_empty(&sema->waiters))
+    {
+      struct thread*to_be_woken=find_highest_priority_and_dequeue(&sema->waiters);
+      thread_unblock(to_be_woken);
+    }
   intr_set_level(old_level);
 }
 
@@ -139,6 +142,30 @@ static void sema_test_helper(void* sema_) {
   }
 }
 
+/*实现连环优先级捐赠*/
+void priority_donation_chain(struct thread*holder)
+{
+  if(holder->lock==NULL)return;
+  struct thread*holder_of_holder=holder->lock->holder;
+  if(holder_of_holder->priority<holder->priority)
+  {
+    holder_of_holder->priority=thread_get_priority();
+    priority_donation_chain(holder_of_holder);
+  }
+}
+
+/*设置tmp_priority的值，用于优先级捐赠*/
+static void check_priority(struct lock*lock)
+{
+  if(lock->holder!=NULL&&thread_get_priority()>lock->holder->priority)
+  {
+    if(lock->tmp_priority==-1)
+    lock->tmp_priority=lock->holder->priority;
+    lock->holder->priority=thread_get_priority();
+    priority_donation_chain(lock->holder);
+  }
+}
+
 /* Initializes LOCK.  A lock can be held by at most a single
    thread at any given time.  Our locks are not "recursive", that
    is, it is an error for the thread currently holding a lock to
@@ -156,7 +183,7 @@ static void sema_test_helper(void* sema_) {
    instead of a lock. */
 void lock_init(struct lock* lock) {
   ASSERT(lock != NULL);
-
+  lock->tmp_priority=-1;
   lock->holder = NULL;
   sema_init(&lock->semaphore, 1);
 }
@@ -174,7 +201,10 @@ void lock_acquire(struct lock* lock) {
   ASSERT(!intr_context());
   ASSERT(!lock_held_by_current_thread(lock));
 
+  check_priority(lock);
+  thread_current()->lock=lock;
   sema_down(&lock->semaphore);
+  thread_current()->lock=NULL;
   lock->holder = thread_current();
 }
 
@@ -190,9 +220,14 @@ bool lock_try_acquire(struct lock* lock) {
   ASSERT(lock != NULL);
   ASSERT(!lock_held_by_current_thread(lock));
 
+  check_priority(lock);
+  thread_current()->lock=lock;
   success = sema_try_down(&lock->semaphore);
   if (success)
-    lock->holder = thread_current();
+    {
+      thread_current()->lock=NULL;
+      lock->holder = thread_current();
+    }
   return success;
 }
 
@@ -207,6 +242,12 @@ void lock_release(struct lock* lock) {
 
   lock->holder = NULL;
   sema_up(&lock->semaphore);
+  if(lock->tmp_priority!=-1)
+  {    
+    thread_set_priority(lock->tmp_priority);
+    lock->tmp_priority=-1;
+    thread_yield();
+  }
 }
 
 /* Returns true if the current thread holds LOCK, false

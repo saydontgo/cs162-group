@@ -105,7 +105,7 @@ struct thread {
   char name[16];             /* Name (for debugging purposes). */
   uint8_t* stack;            /* Saved stack pointer. */
   int priority;              /* Priority. */
-  int64_t wake_time;        /* 苏醒时间*/
+  int64_t wake_time;         /* 苏醒时间*/
   struct list_elem allelem;  /* List element for all threads list. */
 
   int cur_file_fd;                  /*下一个使用的文件描述符*/
@@ -116,6 +116,8 @@ struct thread {
   /* Shared between thread.c and synch.c. */
   struct list_elem elem; /* List element. */
 
+  struct lock*lock;      /* 该进程正在等待的锁*/
+
 #ifdef USERPROG
   /* Owned by process.c. */
   struct list*child_process;        /*子进程的list*/
@@ -124,7 +126,7 @@ struct thread {
   struct thread *father;            /*进程他爸*/
   struct semaphore wait_for_child;  /*调用wait时使用的信号量*/
   bool waited;                      /*该子进程是否已被等待过*/
-  
+
 #endif
 
   /*浮点数状态保存*/
@@ -166,6 +168,8 @@ struct thread* thread_current(void);
 tid_t thread_tid(void);
 const char* thread_name(void);
 bool is_executing(const char*);  //判断一个线程是否正在被执行
+void priority_insert_threads(struct thread *,struct list*);
+struct thread*find_highest_priority_and_dequeue(struct list*);
 
 void thread_exit(void) NO_RETURN;
 void thread_yield(void);
