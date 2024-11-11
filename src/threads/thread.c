@@ -446,8 +446,20 @@ void thread_foreach(thread_action_func* func, void* aux) {
   }
 }
 
-/* Sets the current thread's priority to NEW_PRIORITY. */
-void thread_set_priority(int new_priority) { thread_current()->priority = new_priority; }
+/* Sets the current thread's real priority to NEW_PRIORITY. */
+void thread_set_priority(int new_priority) 
+{ 
+  struct thread*cur=thread_current();
+  if(cur->real_priority==cur->priority)
+  {
+    cur->real_priority=new_priority;
+    cur->priority=new_priority;
+    return;
+  }
+  cur->real_priority=new_priority;
+  if(cur->real_priority>cur->priority)
+  cur->priority=cur->real_priority;
+}
 
 /* Returns the current thread's priority. */
 int thread_get_priority(void) { return thread_current()->priority; }
@@ -548,6 +560,9 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   strlcpy(t->name, name, sizeof t->name);
   t->stack = (uint8_t*)t + PGSIZE;
   t->priority = priority;
+  t->real_priority=priority;
+  /*初始化持有的锁的链表*/
+  list_init(&t->locks);
   t->pcb = NULL;
   t->magic = THREAD_MAGIC;
 

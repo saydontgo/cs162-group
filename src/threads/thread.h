@@ -105,6 +105,7 @@ struct thread {
   char name[16];             /* Name (for debugging purposes). */
   uint8_t* stack;            /* Saved stack pointer. */
   int priority;              /* Priority. */
+  int real_priority;         /* 实际的优先级，不受优先级捐赠影响*/
   int64_t wake_time;         /* 苏醒时间*/
   struct list_elem allelem;  /* List element for all threads list. */
 
@@ -117,6 +118,7 @@ struct thread {
   struct list_elem elem; /* List element. */
 
   struct lock*lock;      /* 该进程正在等待的锁*/
+  struct list locks;     /* 该进程被捐赠的锁的链表*/
 
 #ifdef USERPROG
   /* Owned by process.c. */
@@ -127,10 +129,10 @@ struct thread {
   struct semaphore wait_for_child;  /*调用wait时使用的信号量*/
   bool waited;                      /*该子进程是否已被等待过*/
 
-#endif
-
   /*浮点数状态保存*/
   struct fpu_state fs;  /*当前进程的fpu状态*/
+#endif
+
 
   /* Owned by thread.c. */
   unsigned magic; /* Detects stack overflow. */
