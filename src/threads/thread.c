@@ -248,6 +248,10 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   /* Add to run queue.*/
   thread_unblock(t);
 
+  /* 若是优先级调度且优先级较高则释放cpu*/
+  if(active_sched_policy==SCHED_PRIO&&t->priority>thread_current()->priority)
+  thread_yield();
+
   return tid;
 }
 
@@ -337,13 +341,6 @@ void thread_unblock(struct thread* t) {
   ASSERT(t->status == THREAD_BLOCKED);
   thread_enqueue(t);
   t->status = THREAD_READY;
-  struct thread*cur=thread_current();
-  if(cur!=idle_thread&&active_sched_policy==SCHED_PRIO&&t->priority>cur->priority)
-  {
-    thread_enqueue(cur);
-    cur->status=THREAD_READY;
-    schedule();
-  }
   intr_set_level(old_level);
 }
 

@@ -103,12 +103,15 @@ void sema_up(struct semaphore* sema) {
 
   old_level = intr_disable();
   sema->value++;
+  struct thread*to_be_woken=NULL;
   if (!list_empty(&sema->waiters))
     {
-      struct thread*to_be_woken=find_highest_priority_and_dequeue(&sema->waiters);
+      to_be_woken=find_highest_priority_and_dequeue(&sema->waiters);
       thread_unblock(to_be_woken);
     }
   intr_set_level(old_level);
+  if(!intr_context()&&to_be_woken&&to_be_woken->priority>thread_current()->priority)
+  thread_yield();
 }
 
 static void sema_test_helper(void* sema_);
@@ -267,7 +270,6 @@ void lock_release(struct lock* lock) {
   ASSERT(lock_held_by_current_thread(lock));
 
   lock->holder = NULL;
-  sema_up(&lock->semaphore);
   int highest_pri=find_pri(lock);
   if(highest_pri!=-1)
   {    
@@ -281,8 +283,8 @@ void lock_release(struct lock* lock) {
     cur->priority=cur->real_priority;
     
     lock->tmp_priority=-1;
-    thread_yield();
   }
+  sema_up(&lock->semaphore);
   // if(lock->tmp_priority!=-1)
   // {    
   //   thread_set_priority(lock->tmp_priority);
