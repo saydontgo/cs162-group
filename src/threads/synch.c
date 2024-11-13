@@ -347,6 +347,7 @@ void rw_lock_release(struct rw_lock* rw_lock, bool reader) {
 struct semaphore_elem {
   struct list_elem elem;      /* List element. */
   struct semaphore semaphore; /* This semaphore. */
+  struct thread*holder;       /* 确认发信号时唤醒的进程*/
 };
 
 /* Initializes condition variable COND.  A condition variable
@@ -387,10 +388,32 @@ void cond_wait(struct condition* cond, struct lock* lock) {
   ASSERT(lock_held_by_current_thread(lock));
 
   sema_init(&waiter.semaphore, 0);
+  waiter.holder=thread_current();
   list_push_back(&cond->waiters, &waiter.elem);
   lock_release(lock);
   sema_down(&waiter.semaphore);
   lock_acquire(lock);
+}
+
+
+struct semaphore_elem*find_highest_sema_priority_and_dequeue(struct list*waiters)
+{
+  ASSERT(waiters!=NULL);
+  struct list_elem*e;
+  struct semaphore_elem*max=NULL;
+  int highest_pri=-1;
+  for(e=list_begin(waiters);e!=list_end(waiters);e=list_next(e))
+  {
+    struct semaphore_elem*tmp=list_entry(e,struct semaphore_elem,elem);
+    if(tmp->holder->priority>highest_pri)
+    {
+      max=tmp;
+      highest_pri=tmp->holder->priority;
+    }
+  }
+  ASSERT(max!=NULL);
+  list_remove(&max->elem);
+  return max;
 }
 
 /* If any threads are waiting on COND (protected by LOCK), then
@@ -407,7 +430,10 @@ void cond_signal(struct condition* cond, struct lock* lock UNUSED) {
   ASSERT(lock_held_by_current_thread(lock));
 
   if (!list_empty(&cond->waiters))
-    sema_up(&list_entry(list_pop_front(&cond->waiters), struct semaphore_elem, elem)->semaphore);
+    {
+      struct semaphore_elem*max_pri=find_highest_sema_priority_and_dequeue(&cond->waiters);
+      sema_up(&max_pri->semaphore);
+    }
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by
