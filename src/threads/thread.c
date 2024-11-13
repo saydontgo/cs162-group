@@ -447,15 +447,16 @@ void thread_foreach(thread_action_func* func, void* aux) {
 void thread_set_priority(int new_priority) 
 { 
   struct thread*cur=thread_current();
+  ASSERT(cur->priority>=cur->real_priority);
   if(cur->real_priority==cur->priority)
   {
-    cur->real_priority=new_priority;
     cur->priority=new_priority;
-    return;
+    cur->real_priority=new_priority;
   }
-  cur->real_priority=new_priority;
-  if(cur->real_priority>cur->priority)
-  cur->priority=cur->real_priority;
+  else if(cur->real_priority<cur->priority)
+    cur->real_priority=new_priority;
+  
+  thread_yield();
 }
 
 /* Returns the current thread's priority. */

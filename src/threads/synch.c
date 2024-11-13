@@ -25,7 +25,6 @@
    PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR
    MODIFICATIONS.
 */
-#define FORDECTION ((int)1e8)    /*这个常量是用来判断锁被释放时线程应如何修改其自身的priority*/
 #include "threads/synch.h"
 #include <stdio.h>
 #include <string.h>
@@ -162,8 +161,6 @@ static void check_priority(struct lock*lock)
 {
   if(lock->holder!=NULL&&thread_get_priority()>lock->holder->priority)
   {
-    if(lock->tmp_priority==-1)
-    lock->tmp_priority=lock->holder->priority;
     lock->holder->priority=thread_get_priority();
     priority_donation_chain(lock->holder);
   }
@@ -186,7 +183,6 @@ static void check_priority(struct lock*lock)
    instead of a lock. */
 void lock_init(struct lock* lock) {
   ASSERT(lock != NULL);
-  lock->tmp_priority=-1;
   lock->holder = NULL;
   sema_init(&lock->semaphore, 1);
 }
@@ -242,23 +238,27 @@ int find_pri(struct lock*lock)
   ASSERT(lock!=NULL);
   struct list_elem*e;
   struct thread*cur=thread_current();
-  int count=0;
   int max=-1;
   struct list_elem*tmp_elem=NULL;
   for(e=list_begin(&cur->locks);e!=list_end(&cur->locks);e=list_next(e))
   {
-    struct lock*tmp=list_entry(e,struct lock,elem);
-    if(tmp->tmp_priority!=-1)count++;
-    if(tmp->tmp_priority>max)
+    struct lock*tmp_lock=list_entry(e,struct lock,elem);
+    if(tmp_lock==lock)
     {
-      max=tmp->tmp_priority;
-    }
-    if(tmp==lock)
       tmp_elem=e;
+      continue;
+    }
+    struct list_elem*ej=NULL;
+    for(ej=list_begin(&tmp_lock->semaphore.waiters);ej!=list_end(&tmp_lock->semaphore.waiters);ej=list_next(ej))
+    {
+      struct thread*tmp_thread=list_entry(ej,struct thread,elem);
+      if(tmp_thread->priority>max)
+      max=tmp_thread->priority;
+    }
   }
   if(tmp_elem)
   list_remove(tmp_elem);
-  return count>1?max+FORDECTION:max;
+  return max;
 }
 /* Releases LOCK, which must be owned by the current thread.
 
@@ -271,26 +271,9 @@ void lock_release(struct lock* lock) {
 
   lock->holder = NULL;
   int highest_pri=find_pri(lock);
-  if(highest_pri!=-1)
-  {    
-    struct thread*cur=thread_current();
-    if(highest_pri>FORDECTION)
-    {
-      highest_pri-=FORDECTION;
-      cur->priority=highest_pri>cur->real_priority?highest_pri:cur->real_priority;
-    }
-    else if(lock->tmp_priority!=-1)
-    cur->priority=cur->real_priority;
-    
-    lock->tmp_priority=-1;
-  }
+  struct thread*cur=thread_current();
+  cur->priority=highest_pri>cur->real_priority?highest_pri:cur->real_priority;
   sema_up(&lock->semaphore);
-  // if(lock->tmp_priority!=-1)
-  // {    
-  //   thread_set_priority(lock->tmp_priority);
-  //   lock->tmp_priority=-1;
-  //   thread_yield();
-  // }
 }
 
 /* Returns true if the current thread holds LOCK, false
